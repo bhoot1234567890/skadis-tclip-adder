@@ -283,23 +283,23 @@ class SkadisToolGUI:
         # Store face data for click detection
         self.face_data = {
             'front': {'vertices': np.array([[min_b[0], max_b[1], min_b[2]], [max_b[0], max_b[1], min_b[2]], 
-                                           [max_b[0], max_b[1], max_b[2]], [min_b[0], max_b[1], max_b[2]]]),
-                     'color': BBOX_COLORS['front'], 'label': 'Front (+Y)', 'plane': 'xz', 'boundary': 'max_y'},
+                           [max_b[0], max_b[1], max_b[2]], [min_b[0], max_b[1], max_b[2]]]),
+                 'color': BBOX_COLORS['front'], 'label': 'Front (+Y)', 'plane': 'xz', 'boundary': 'max_y', 'cut_normal': np.array([0, -1, 0])},
             'back': {'vertices': np.array([[min_b[0], min_b[1], min_b[2]], [min_b[0], min_b[1], max_b[2]],
-                                          [max_b[0], min_b[1], max_b[2]], [max_b[0], min_b[1], min_b[2]]]),
-                    'color': BBOX_COLORS['back'], 'label': 'Back (-Y)', 'plane': 'xz', 'boundary': 'min_y'},
+                          [max_b[0], min_b[1], max_b[2]], [max_b[0], min_b[1], min_b[2]]]),
+                'color': BBOX_COLORS['back'], 'label': 'Back (-Y)', 'plane': 'xz', 'boundary': 'min_y', 'cut_normal': np.array([0, 1, 0])},
             'left': {'vertices': np.array([[min_b[0], min_b[1], min_b[2]], [min_b[0], max_b[1], min_b[2]],
-                                          [min_b[0], max_b[1], max_b[2]], [min_b[0], min_b[1], max_b[2]]]),
-                    'color': BBOX_COLORS['left'], 'label': 'Left (-X)', 'plane': 'yz', 'boundary': 'min_x'},
+                          [min_b[0], max_b[1], max_b[2]], [min_b[0], min_b[1], max_b[2]]]),
+                'color': BBOX_COLORS['left'], 'label': 'Left (-X)', 'plane': 'yz', 'boundary': 'min_x', 'cut_normal': np.array([1, 0, 0])},
             'right': {'vertices': np.array([[max_b[0], min_b[1], min_b[2]], [max_b[0], min_b[1], max_b[2]],
-                                           [max_b[0], max_b[1], max_b[2]], [max_b[0], max_b[1], min_b[2]]]),
-                     'color': BBOX_COLORS['right'], 'label': 'Right (+X)', 'plane': 'yz', 'boundary': 'max_x'},
+                           [max_b[0], max_b[1], max_b[2]], [max_b[0], max_b[1], min_b[2]]]),
+                 'color': BBOX_COLORS['right'], 'label': 'Right (+X)', 'plane': 'yz', 'boundary': 'max_x', 'cut_normal': np.array([-1, 0, 0])},
             'top': {'vertices': np.array([[min_b[0], min_b[1], max_b[2]], [min_b[0], max_b[1], max_b[2]],
-                                         [max_b[0], max_b[1], max_b[2]], [max_b[0], min_b[1], max_b[2]]]),
-                   'color': BBOX_COLORS['top'], 'label': 'Top (+Z)', 'plane': 'xy', 'boundary': 'max_z'},
+                         [max_b[0], max_b[1], max_b[2]], [max_b[0], min_b[1], max_b[2]]]),
+               'color': BBOX_COLORS['top'], 'label': 'Top (+Z)', 'plane': 'xy', 'boundary': 'max_z', 'cut_normal': np.array([0, 0, -1])},
             'bottom': {'vertices': np.array([[min_b[0], min_b[1], min_b[2]], [max_b[0], min_b[1], min_b[2]],
-                                            [max_b[0], max_b[1], min_b[2]], [min_b[0], max_b[1], min_b[2]]]),
-                      'color': BBOX_COLORS['bottom'], 'label': 'Bottom (-Z)', 'plane': 'xy', 'boundary': 'min_z'}
+                            [max_b[0], max_b[1], min_b[2]], [min_b[0], max_b[1], min_b[2]]]),
+                  'color': BBOX_COLORS['bottom'], 'label': 'Bottom (-Z)', 'plane': 'xy', 'boundary': 'min_z', 'cut_normal': np.array([0, 0, 1])}
         }
         
         # Draw faces
@@ -355,8 +355,8 @@ class SkadisToolGUI:
             self.selected_face = face_name
             self.grid_plane = face_info['plane']
             self.boundary_type = face_info['boundary']
+            self.cut_normal = face_info.get('cut_normal', None)
             self.face_label.config(text=face_info['label'], foreground="green")
-            
             # Generate grid
             self.generate_grid()
     
@@ -522,16 +522,18 @@ class SkadisToolGUI:
         """Process mesh: cut holes and insert T-clips."""
         if not self.mesh or not self.selected_slots:
             return
-        
         try:
             self.status_label.config(text="Processing...")
             self.root.update()
-            
             # Get selected slot positions
             selected_slot_objs = [s for s in self.grid.slots if s['index'] in self.selected_slots]
             slot_positions = [slot['position'] for slot in selected_slot_objs]
             depth = self.depth_var.get()
-            
+            cut_normal = getattr(self, 'cut_normal', None)
+            print(f"[DEBUG] Slot positions: {slot_positions}")
+            print(f"[DEBUG] Depth: {depth}")
+            print(f"[DEBUG] Grid plane: {self.grid_plane}")
+            print(f"[DEBUG] Cut normal: {cut_normal}")
             # Process
             self.result_mesh = process_multiple_slots(
                 self.mesh,
@@ -539,14 +541,13 @@ class SkadisToolGUI:
                 depth,
                 self.tclip_mesh,
                 self.grid_plane,
-                skip_holes=False
+                skip_holes=False,
+                cut_normal=cut_normal
             )
-            
             # Show result
             self.show_result()
             self.export_btn.config(state=tk.NORMAL)
             self.status_label.config(text=f"Processed {len(self.selected_slots)} slots")
-            
         except Exception as e:
             messagebox.showerror("Error", f"Processing failed:\n{e}")
             self.status_label.config(text="Error during processing")

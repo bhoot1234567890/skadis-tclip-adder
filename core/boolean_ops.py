@@ -5,7 +5,7 @@ import numpy as np
 from config import T_CLIP_CIRCLE_DIAMETER
 
 
-def create_cutting_cylinder(position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane='xy'):
+def create_cutting_cylinder(position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane='xy', cut_normal=None):
     """
     Create a cylinder for cutting mounting holes.
     
@@ -14,52 +14,54 @@ def create_cutting_cylinder(position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, gr
         depth: Depth of the cylinder in mm
         diameter: Diameter in mm (default: 28.284mm)
         grid_plane: Plane orientation ('xy', 'xz', 'yz')
+        cut_normal: np.array, direction to cut into the mesh (optional)
         
     Returns:
         trimesh.Trimesh: Cylinder mesh
     """
     radius = diameter / 2.0
-    
     # Create cylinder aligned with Z-axis by default
     cylinder = trimesh.creation.cylinder(
         radius=radius,
         height=depth,
         sections=32  # Smooth circle
     )
-    
-    # Rotate cylinder based on grid plane to cut perpendicular to that plane
-    if grid_plane == 'xz':
-        # Grid on XZ plane, cut along Y-axis (rotate 90° around X)
-        rotation = trimesh.transformations.rotation_matrix(
-            np.radians(90), [1, 0, 0], [0, 0, 0]
-        )
-        cylinder.apply_transform(rotation)
-    elif grid_plane == 'yz':
-        # Grid on YZ plane, cut along X-axis (rotate 90° around Y)
-        rotation = trimesh.transformations.rotation_matrix(
-            np.radians(90), [0, 1, 0], [0, 0, 0]
-        )
-        cylinder.apply_transform(rotation)
-    # else: grid_plane == 'xy', cylinder already aligned with Z-axis (perpendicular to XY)
-    
-    # Offset cylinder by half depth so it cuts inward from the surface
-    if grid_plane == 'xy':
-        # Move down by half depth
-        cylinder.apply_translation([0, 0, -depth/2])
-    elif grid_plane == 'xz':
-        # Move along -Y by half depth
-        cylinder.apply_translation([0, -depth/2, 0])
-    else:  # 'yz'
-        # Move along -X by half depth
-        cylinder.apply_translation([-depth/2, 0, 0])
-    
-    # Position at the specified location
-    cylinder.apply_translation(position)
-    
+    if cut_normal is not None:
+        n = np.array(cut_normal, dtype=float)
+        n /= np.linalg.norm(n)
+        axis = np.array([0, 0, 1], dtype=float)
+        if not np.allclose(n, axis):
+            rot_axis = np.cross(axis, n)
+            rot_angle = np.arccos(np.clip(np.dot(axis, n), -1.0, 1.0))
+            if np.linalg.norm(rot_axis) > 1e-6:
+                rot_axis /= np.linalg.norm(rot_axis)
+                rot_matrix = trimesh.transformations.rotation_matrix(rot_angle, rot_axis)
+                cylinder.apply_transform(rot_matrix)
+        # Place base of cylinder at position, extend into mesh along n
+        cylinder.apply_translation(position + n * (depth / 2.0))
+    else:
+        # Old behavior: orient and offset by grid_plane
+        if grid_plane == 'xz':
+            rotation = trimesh.transformations.rotation_matrix(
+                np.radians(90), [1, 0, 0], [0, 0, 0]
+            )
+            cylinder.apply_transform(rotation)
+        elif grid_plane == 'yz':
+            rotation = trimesh.transformations.rotation_matrix(
+                np.radians(90), [0, 1, 0], [0, 0, 0]
+            )
+            cylinder.apply_transform(rotation)
+        if grid_plane == 'xy':
+            cylinder.apply_translation([0, 0, -depth/2])
+        elif grid_plane == 'xz':
+            cylinder.apply_translation([0, -depth/2, 0])
+        else:  # 'yz'
+            cylinder.apply_translation([-depth/2, 0, 0])
+        cylinder.apply_translation(position)
     return cylinder
 
 
-def cut_hole(mesh, position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane='xy'):
+def cut_hole(mesh, position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane='xy', cut_normal=None):
     """
     Cut a circular hole in the mesh at specified position.
     
@@ -69,6 +71,7 @@ def cut_hole(mesh, position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane=
         depth: Depth of cut in mm
         diameter: Hole diameter in mm
         grid_plane: Plane orientation for proper cutting direction
+        cut_normal: np.array, direction to cut into the mesh (optional)
         
     Returns:
         trimesh.Trimesh: Mesh with hole cut out
@@ -76,8 +79,8 @@ def cut_hole(mesh, position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane=
     print(f"  - Cutting {diameter:.2f}mm diameter hole at position ({position[0]:.2f}, {position[1]:.2f}, {position[2]:.2f})")
     print(f"    Depth: {depth:.2f}mm, Grid plane: {grid_plane.upper()}")
     
-    # Create cutting cylinder oriented correctly for the grid plane
-    cutter = create_cutting_cylinder(position, depth, diameter, grid_plane)
+    # Create cutting cylinder oriented correctly for the grid plane and normal
+    cutter = create_cutting_cylinder(position, depth, diameter, grid_plane, cut_normal)
     
     # Perform boolean difference - try different engines
     engines_to_try = []
@@ -105,7 +108,7 @@ def cut_hole(mesh, position, depth, diameter=T_CLIP_CIRCLE_DIAMETER, grid_plane=
     return mesh
 
 
-def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy'):
+def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', cut_normal=None):
     """
     Insert T-clip mounting slot at specified position.
     
@@ -115,6 +118,7 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy'):
         position: (x, y, z) position for T-clip
         rotation_angle: Rotation around insertion axis in degrees
         grid_plane: Plane orientation for proper T-clip orientation
+        cut_normal: np.array, direction pointing into the mesh (optional)
         
     Returns:
         trimesh.Trimesh: Combined mesh with T-clip
@@ -134,28 +138,61 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy'):
     # Assume Y is the thin dimension in the original model
     thin_axis_idx = 1  # Y-axis
     
-    # Orient T-clip based on grid plane
-    # The thin dimension should point perpendicular to the grid plane
-    if grid_plane == 'xy':
-        # Grid on XY plane, thin dimension should point along Z-axis
-        # Original thin is Y, need to rotate Y→Z: rotate -90° around X
-        rotation = trimesh.transformations.rotation_matrix(
-            np.radians(-90), [1, 0, 0], [0, 0, 0]
-        )
-        tclip_copy.apply_transform(rotation)
-        print(f"    Applied -90° rotation around X-axis (Y→Z for XY plane)")
-    elif grid_plane == 'xz':
-        # Grid on XZ plane, thin dimension should point along Y-axis
-        # Original thin is already Y, NO rotation needed
-        print(f"    No rotation needed (Y-axis already perpendicular to XZ plane)")
-    elif grid_plane == 'yz':
-        # Grid on YZ plane, thin dimension should point along X-axis
-        # Original thin is Y, need to rotate Y→X: rotate -90° around Z
-        rotation = trimesh.transformations.rotation_matrix(
-            np.radians(-90), [0, 0, 1], [0, 0, 0]
-        )
-        tclip_copy.apply_transform(rotation)
-        print(f"    Applied -90° rotation around Z-axis (Y→X for YZ plane)")
+    # Orient T-clip based on cut_normal if provided, otherwise use grid_plane
+    if cut_normal is not None:
+        # Normalize the normal
+        n = np.array(cut_normal, dtype=float)
+        n /= np.linalg.norm(n)
+        
+        # Original T-clip: Y-axis is thin dimension, goes from negative to positive
+        # The mounting face (base) is at MAX Y (Y=0 after centering)
+        # We want the mounting face to point in the OPPOSITE direction of cut_normal
+        # (cut_normal points INTO mesh, base should be flush at face)
+        
+        # Target: align Y-axis with NEGATIVE cut_normal
+        target_axis = -n
+        from_axis = np.array([0, 1, 0], dtype=float)
+        
+        if not np.allclose(target_axis, from_axis):
+            # Check if it's pointing in opposite direction (180 degree rotation needed)
+            if np.allclose(target_axis, -from_axis):
+                # Need 180 degree rotation - use X-axis as rotation axis
+                rot_matrix = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
+                tclip_copy.apply_transform(rot_matrix)
+                print(f"    Applied 180° rotation to reverse Y-axis direction")
+            else:
+                rot_axis = np.cross(from_axis, target_axis)
+                rot_angle = np.arccos(np.clip(np.dot(from_axis, target_axis), -1.0, 1.0))
+                if np.linalg.norm(rot_axis) > 1e-6:
+                    rot_axis /= np.linalg.norm(rot_axis)
+                    rot_matrix = trimesh.transformations.rotation_matrix(rot_angle, rot_axis)
+                    tclip_copy.apply_transform(rot_matrix)
+                    print(f"    Oriented T-clip: Y-axis now points opposite to cut_normal: {-n}")
+        else:
+            print(f"    T-clip Y-axis already points opposite to cut_normal")
+    else:
+        # Orient T-clip based on grid plane
+        # The thin dimension should point perpendicular to the grid plane
+        if grid_plane == 'xy':
+            # Grid on XY plane, thin dimension should point along Z-axis
+            # Original thin is Y, need to rotate Y→Z: rotate -90° around X
+            rotation = trimesh.transformations.rotation_matrix(
+                np.radians(-90), [1, 0, 0], [0, 0, 0]
+            )
+            tclip_copy.apply_transform(rotation)
+            print(f"    Applied -90° rotation around X-axis (Y→Z for XY plane)")
+        elif grid_plane == 'xz':
+            # Grid on XZ plane, thin dimension should point along Y-axis
+            # Original thin is already Y, NO rotation needed
+            print(f"    No rotation needed (Y-axis already perpendicular to XZ plane)")
+        elif grid_plane == 'yz':
+            # Grid on YZ plane, thin dimension should point along X-axis
+            # Original thin is Y, need to rotate Y→X: rotate -90° around Z
+            rotation = trimesh.transformations.rotation_matrix(
+                np.radians(-90), [0, 0, 1], [0, 0, 0]
+            )
+            tclip_copy.apply_transform(rotation)
+            print(f"    Applied -90° rotation around Z-axis (Y→X for YZ plane)")
     
     # Apply additional rotation if specified
     if rotation_angle != 0:
@@ -179,26 +216,40 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy'):
     rot_dims = rot_bounds[1] - rot_bounds[0]
     print(f"    After rotation: centroid=({rot_centroid[0]:.4f}, {rot_centroid[1]:.4f}, {rot_centroid[2]:.4f}), dims=({rot_dims[0]:.2f}, {rot_dims[1]:.2f}, {rot_dims[2]:.2f})")
     
-    # Calculate offset to make T-clip exactly flush with face
-    # We want the outer edge of the T-clip to be exactly at the grid position
+    # Calculate offset to make T-clip exactly flush with face, facing inside
     flush_offset = np.array([0.0, 0.0, 0.0])
-    
-    if grid_plane == 'xy':
-        # Grid on XY plane at specific Z, T-clip thin dimension is now along Z
-        # We want max Z of T-clip to be at position Z
-        flush_offset[2] = -rot_bounds[1][2]  # Offset so max Z aligns with position
-        print(f"    Flush offset: Z={flush_offset[2]:.2f}mm (max Z edge at grid plane)")
-    elif grid_plane == 'xz':
-        # Grid on XZ plane at specific Y, T-clip thin dimension is along Y
-        # We want max Y of T-clip to be at position Y
-        flush_offset[1] = -rot_bounds[1][1]  # Offset so max Y aligns with position
-        print(f"    Flush offset: Y={flush_offset[1]:.2f}mm (max Y edge at grid plane)")
-    elif grid_plane == 'yz':
-        # Grid on YZ plane at specific X, T-clip thin dimension is along X
-        # We want max X of T-clip to be at position X
-        flush_offset[0] = -rot_bounds[1][0]  # Offset so max X aligns with position
-        print(f"    Flush offset: X={flush_offset[0]:.2f}mm (max X edge at grid plane)")
-    
+    if cut_normal is not None:
+        # Determine which axis the normal aligns with and whether it's positive or negative
+        n = np.array(cut_normal, dtype=float)
+        n /= np.linalg.norm(n)
+        
+        # Find dominant axis
+        abs_n = np.abs(n)
+        dominant_axis = np.argmax(abs_n)
+        is_positive = n[dominant_axis] > 0
+        
+        # After rotation, the T-clip's base (mounting plate) is at MIN bound of the thin dimension
+        # (because we rotated it to point opposite to cut_normal)
+        # We want this MIN bound to be at the face position
+        flush_offset[dominant_axis] = -rot_bounds[0][dominant_axis]
+        print(f"    Flush offset: axis {dominant_axis}, using MIN bound (mounting face at surface, offset={flush_offset[dominant_axis]:.2f}mm)")
+    else:
+        # We want the inner edge (min) of the T-clip to be at the grid position
+        if grid_plane == 'xy':
+            # Grid on XY plane at specific Z, T-clip thin dimension is now along Z
+            # We want min Z of T-clip to be at position Z
+            flush_offset[2] = -rot_bounds[0][2]  # Offset so min Z aligns with position
+            print(f"    Flush offset: Z={flush_offset[2]:.2f}mm (min Z edge at grid plane, facing inside)")
+        elif grid_plane == 'xz':
+            # Grid on XZ plane at specific Y, T-clip thin dimension is along Y
+            # We want min Y of T-clip to be at position Y
+            flush_offset[1] = -rot_bounds[0][1]  # Offset so min Y aligns with position
+            print(f"    Flush offset: Y={flush_offset[1]:.2f}mm (min Y edge at grid plane, facing inside)")
+        elif grid_plane == 'yz':
+            # Grid on YZ plane at specific X, T-clip thin dimension is along X
+            # We want min X of T-clip to be at position X
+            flush_offset[0] = -rot_bounds[0][0]  # Offset so min X aligns with position
+            print(f"    Flush offset: X={flush_offset[0]:.2f}mm (min X edge at grid plane, facing inside)")
     # Position T-clip with flush offset
     tclip_copy.apply_translation(position + flush_offset)
     
@@ -288,7 +339,7 @@ def process_slot(mesh, slot_position, depth, tclip_mesh=None, grid_plane='xy', s
     return result
 
 
-def process_multiple_slots(mesh, slot_positions, depths, tclip_mesh=None, grid_plane='xy', skip_holes=False):
+def process_multiple_slots(mesh, slot_positions, depths, tclip_mesh=None, grid_plane='xy', skip_holes=False, cut_normal=None):
     """
     Process multiple slots with individual depths.
     
@@ -317,13 +368,13 @@ def process_multiple_slots(mesh, slot_positions, depths, tclip_mesh=None, grid_p
         print("\n--- Cutting holes ---")
         for i, (position, depth) in enumerate(zip(slot_positions, depths)):
             print(f"\nHole {i+1}/{len(slot_positions)}:")
-            result = cut_hole(result, position, depth, grid_plane=grid_plane)
+            result = cut_hole(result, position, depth, grid_plane=grid_plane, cut_normal=cut_normal)
     
     # SECOND: Insert all T-clips (if provided)
     if tclip_mesh is not None:
         print("\n--- Inserting T-clips ---")
         for i, position in enumerate(slot_positions):
             print(f"\nT-clip {i+1}/{len(slot_positions)}:")
-            result = insert_tclip(result, tclip_mesh, position, grid_plane=grid_plane)
+            result = insert_tclip(result, tclip_mesh, position, grid_plane=grid_plane, cut_normal=cut_normal)
     
     return result
