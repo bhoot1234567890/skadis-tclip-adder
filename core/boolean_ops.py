@@ -147,10 +147,11 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
         # IMPORTANT: After our fix, the mounting face is at MIN Y = 0
         # The T-clip extends from Y=0 (mounting face) to Y=5.4 (into mesh)
         # The Y-axis points FROM mounting face INTO the mesh
-        # We want the T-clip to point in the SAME direction as cut_normal (INTO mesh)
+        # We want the T-clip to point in the OPPOSITE direction as cut_normal
+        # (cut_normal points INTO mesh, but T-clip Y points OUT from its base)
 
-        # Target: align Y-axis with cut_normal (so T-clip points INTO mesh)
-        target_axis = n
+        # Target: align Y-axis OPPOSITE to cut_normal (so T-clip base faces cut_normal direction)
+        target_axis = -n  # Flip the direction
         from_axis = np.array([0, 1, 0], dtype=float)  # T-clip Y-axis points up
         
         if not np.allclose(target_axis, from_axis):
@@ -159,11 +160,8 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
                 # Need 180 degree rotation - use X-axis as rotation axis
                 rot_matrix = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
                 tclip_copy.apply_transform(rot_matrix)
-                print(f"    Applied 180° rotation to reverse Y-axis direction")
-                # After this rotation, the T-clip is flipped - need 180° around Y to fix orientation
-                rot_matrix_y = trimesh.transformations.rotation_matrix(np.pi, [0, 1, 0])
-                tclip_copy.apply_transform(rot_matrix_y)
-                print(f"    Applied 180° rotation around Y-axis to fix T orientation")
+                print(f"    Applied 180° rotation to align with mounting surface")
+                # Note: T-clip orientation in the plane depends on original model
             else:
                 rot_axis = np.cross(from_axis, target_axis)
                 rot_angle = np.arccos(np.clip(np.dot(from_axis, target_axis), -1.0, 1.0))
@@ -171,9 +169,9 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
                     rot_axis /= np.linalg.norm(rot_axis)
                     rot_matrix = trimesh.transformations.rotation_matrix(rot_angle, rot_axis)
                     tclip_copy.apply_transform(rot_matrix)
-                    print(f"    Oriented T-clip: Y-axis now points along cut_normal: {n}")
+                    print(f"    Oriented T-clip: Y-axis now points opposite to cut_normal")
         else:
-            print(f"    T-clip Y-axis already points along cut_normal")
+            print(f"    T-clip Y-axis already aligned correctly")
     else:
         # Orient T-clip based on grid plane
         # The thin dimension should point perpendicular to the grid plane
