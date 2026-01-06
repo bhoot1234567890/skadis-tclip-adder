@@ -235,11 +235,11 @@ class SkadisToolGUI:
                         self.tclip_mesh.apply_scale(1000.0)
                         # IMPORTANT: Center so the MOUNTING FACE is at origin, not the centroid
                         # The mounting face is at the MIN of the thin dimension (Y-axis)
-                        # After scaling, Y bounds are [-3.08, 2.32], so we need to shift by +3.08
                         self.tclip_mesh.apply_translation(-self.tclip_mesh.centroid)
                         # Now re-center so MIN Y (mounting face) is at 0
                         y_min = self.tclip_mesh.bounds[0][1]
                         self.tclip_mesh.apply_translation([0, -y_min, 0])
+                        print(f"✓ T-clip loaded with mounting face at Y={self.tclip_mesh.bounds[0][1]:.4f} (flush mount ready)")
 
                     # Try harder to fix the mesh
                     if not self.tclip_mesh.is_watertight:
