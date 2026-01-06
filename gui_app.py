@@ -233,8 +233,14 @@ class SkadisToolGUI:
                     dims = self.tclip_mesh.bounds[1] - self.tclip_mesh.bounds[0]
                     if max(dims) < 1.0:
                         self.tclip_mesh.apply_scale(1000.0)
+                        # IMPORTANT: Center so the MOUNTING FACE is at origin, not the centroid
+                        # The mounting face is at the MIN of the thin dimension (Y-axis)
+                        # After scaling, Y bounds are [-3.08, 2.32], so we need to shift by +3.08
                         self.tclip_mesh.apply_translation(-self.tclip_mesh.centroid)
-                    
+                        # Now re-center so MIN Y (mounting face) is at 0
+                        y_min = self.tclip_mesh.bounds[0][1]
+                        self.tclip_mesh.apply_translation([0, -y_min, 0])
+
                     # Try harder to fix the mesh
                     if not self.tclip_mesh.is_watertight:
                         print(f"T-clip is not watertight, attempting repairs...")
@@ -247,12 +253,12 @@ class SkadisToolGUI:
                         self.tclip_mesh.merge_vertices()
                         # Try to fix normals
                         self.tclip_mesh.fix_normals()
-                        
+
                         if self.tclip_mesh.is_watertight:
                             print(f"✓ T-clip repaired successfully")
                         else:
                             print(f"⚠ T-clip still not watertight, boolean operations may fail")
-                    
+
                     self.status_label.config(text=f"T-clip loaded from {path.name}")
                     return
                 except Exception as e:

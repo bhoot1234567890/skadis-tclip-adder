@@ -215,42 +215,42 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
     rot_bounds = tclip_copy.bounds
     rot_dims = rot_bounds[1] - rot_bounds[0]
     print(f"    After rotation: centroid=({rot_centroid[0]:.4f}, {rot_centroid[1]:.4f}, {rot_centroid[2]:.4f}), dims=({rot_dims[0]:.2f}, {rot_dims[1]:.2f}, {rot_dims[2]:.2f})")
-    
-    # Calculate offset to make T-clip exactly flush with face, facing inside
+
+    # IMPORTANT: The T-clip is now centered so the mounting face (MIN of thin dimension) is at origin
+    # This means we can directly place it at the grid position - no offset needed!
+    # The T-clip extends INTO the mesh from the mounting face
+
+    # Verify mounting face is at origin (before rotation, it's at MIN Y = 0)
+    # After rotation, we need to find which axis now represents the "thin" dimension (mounting face)
     flush_offset = np.array([0.0, 0.0, 0.0])
+
     if cut_normal is not None:
-        # Determine which axis the normal aligns with and whether it's positive or negative
-        n = np.array(cut_normal, dtype=float)
-        n /= np.linalg.norm(n)
-        
-        # Find dominant axis
-        abs_n = np.abs(n)
-        dominant_axis = np.argmax(abs_n)
-        is_positive = n[dominant_axis] > 0
-        
-        # After rotation, the T-clip's base (mounting plate) is at MIN bound of the thin dimension
-        # (because we rotated it to point opposite to cut_normal)
-        # We want this MIN bound to be at the face position
-        flush_offset[dominant_axis] = -rot_bounds[0][dominant_axis]
-        print(f"    Flush offset: axis {dominant_axis}, using MIN bound (mounting face at surface, offset={flush_offset[dominant_axis]:.2f}mm)")
+        # After orienting with cut_normal, the thin dimension should align with the normal axis
+        # Find which axis has the smallest dimension (the thin one)
+        thin_axis_idx = np.argmin(rot_dims)
+
+        # The mounting face is at the MIN bound of this axis (should be 0 or very close)
+        min_val = rot_bounds[0][thin_axis_idx]
+
+        if abs(min_val) > 0.1:  # If not at origin (within 0.1mm tolerance)
+            print(f"    Warning: Mounting face at {min_val:.2f} on axis {thin_axis_idx}, expected near 0")
+            flush_offset[thin_axis_idx] = -min_val
+
+        print(f"    Mounting face is at MIN of axis {thin_axis_idx} (value={rot_bounds[0][thin_axis_idx]:.4f})")
+        print(f"    T-clip will be flush at face, extending {rot_dims[thin_axis_idx]:.2f}mm INTO mesh")
     else:
-        # We want the inner edge (min) of the T-clip to be at the grid position
+        # Legacy fallback for grid_plane without cut_normal
         if grid_plane == 'xy':
-            # Grid on XY plane at specific Z, T-clip thin dimension is now along Z
-            # We want min Z of T-clip to be at position Z
-            flush_offset[2] = -rot_bounds[0][2]  # Offset so min Z aligns with position
-            print(f"    Flush offset: Z={flush_offset[2]:.2f}mm (min Z edge at grid plane, facing inside)")
+            # Z is the thin dimension after rotation
+            flush_offset[2] = -rot_bounds[0][2]
         elif grid_plane == 'xz':
-            # Grid on XZ plane at specific Y, T-clip thin dimension is along Y
-            # We want min Y of T-clip to be at position Y
-            flush_offset[1] = -rot_bounds[0][1]  # Offset so min Y aligns with position
-            print(f"    Flush offset: Y={flush_offset[1]:.2f}mm (min Y edge at grid plane, facing inside)")
+            # Y is the thin dimension (should already be at 0)
+            flush_offset[1] = -rot_bounds[0][1]
         elif grid_plane == 'yz':
-            # Grid on YZ plane at specific X, T-clip thin dimension is along X
-            # We want min X of T-clip to be at position X
-            flush_offset[0] = -rot_bounds[0][0]  # Offset so min X aligns with position
-            print(f"    Flush offset: X={flush_offset[0]:.2f}mm (min X edge at grid plane, facing inside)")
-    # Position T-clip with flush offset
+            # X is the thin dimension after rotation
+            flush_offset[0] = -rot_bounds[0][0]
+
+    # Position T-clip at grid position (mounting face flush with surface)
     tclip_copy.apply_translation(position + flush_offset)
     
     # Debug: Show final position
