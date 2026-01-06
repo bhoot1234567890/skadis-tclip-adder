@@ -143,15 +143,15 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
         # Normalize the normal
         n = np.array(cut_normal, dtype=float)
         n /= np.linalg.norm(n)
-        
-        # Original T-clip: Y-axis is thin dimension, goes from negative to positive
-        # The mounting face (base) is at MAX Y (Y=0 after centering)
-        # We want the mounting face to point in the OPPOSITE direction of cut_normal
-        # (cut_normal points INTO mesh, base should be flush at face)
-        
-        # Target: align Y-axis with NEGATIVE cut_normal
-        target_axis = -n
-        from_axis = np.array([0, 1, 0], dtype=float)
+
+        # IMPORTANT: After our fix, the mounting face is at MIN Y = 0
+        # The T-clip extends from Y=0 (mounting face) to Y=5.4 (into mesh)
+        # The Y-axis points FROM mounting face INTO the mesh
+        # We want the T-clip to point in the SAME direction as cut_normal (INTO mesh)
+
+        # Target: align Y-axis with cut_normal (so T-clip points INTO mesh)
+        target_axis = n
+        from_axis = np.array([0, 1, 0], dtype=float)  # T-clip Y-axis points up
         
         if not np.allclose(target_axis, from_axis):
             # Check if it's pointing in opposite direction (180 degree rotation needed)
@@ -167,9 +167,9 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
                     rot_axis /= np.linalg.norm(rot_axis)
                     rot_matrix = trimesh.transformations.rotation_matrix(rot_angle, rot_axis)
                     tclip_copy.apply_transform(rot_matrix)
-                    print(f"    Oriented T-clip: Y-axis now points opposite to cut_normal: {-n}")
+                    print(f"    Oriented T-clip: Y-axis now points along cut_normal: {n}")
         else:
-            print(f"    T-clip Y-axis already points opposite to cut_normal")
+            print(f"    T-clip Y-axis already points along cut_normal")
     else:
         # Orient T-clip based on grid plane
         # The thin dimension should point perpendicular to the grid plane
@@ -216,12 +216,10 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
     rot_dims = rot_bounds[1] - rot_bounds[0]
     print(f"    After rotation: centroid=({rot_centroid[0]:.4f}, {rot_centroid[1]:.4f}, {rot_centroid[2]:.4f}), dims=({rot_dims[0]:.2f}, {rot_dims[1]:.2f}, {rot_dims[2]:.2f})")
 
-    # IMPORTANT: The T-clip is now centered so the mounting face (MIN of thin dimension) is at origin
-    # This means we can directly place it at the grid position - no offset needed!
-    # The T-clip extends INTO the mesh from the mounting face
+    # IMPORTANT: The T-clip is now centered so the mounting face is at origin
+    # After rotation, we need to determine which bound (MIN or MAX) is the mounting face
+    # The mounting face should be positioned at the grid location
 
-    # Verify mounting face is at origin (before rotation, it's at MIN Y = 0)
-    # After rotation, we need to find which axis now represents the "thin" dimension (mounting face)
     flush_offset = np.array([0.0, 0.0, 0.0])
 
     if cut_normal is not None:
@@ -229,14 +227,31 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
         # Find which axis has the smallest dimension (the thin one)
         thin_axis_idx = np.argmin(rot_dims)
 
-        # The mounting face is at the MIN bound of this axis (should be 0 or very close)
-        min_val = rot_bounds[0][thin_axis_idx]
+        # The T-clip points in the direction of cut_normal (INTO mesh)
+        # We need to determine which bound (MIN or MAX) represents the mounting face
+        # If the T-clip points in positive direction, mounting face is at MIN
+        # If the T-clip points in negative direction, mounting face is at MAX
 
-        if abs(min_val) > 0.1:  # If not at origin (within 0.1mm tolerance)
-            print(f"    Warning: Mounting face at {min_val:.2f} on axis {thin_axis_idx}, expected near 0")
-            flush_offset[thin_axis_idx] = -min_val
+        n = np.array(cut_normal, dtype=float)
+        n /= np.linalg.norm(n)
 
-        print(f"    Mounting face is at MIN of axis {thin_axis_idx} (value={rot_bounds[0][thin_axis_idx]:.4f})")
+        # Check if T-clip points in positive or negative direction on this axis
+        axis_direction = n[thin_axis_idx]
+
+        if axis_direction > 0:
+            # T-clip points in positive direction, mounting face at MIN
+            mounting_face_val = rot_bounds[0][thin_axis_idx]
+            print(f"    Mounting face is at MIN of axis {thin_axis_idx} (value={mounting_face_val:.4f})")
+            if abs(mounting_face_val) > 0.1:
+                flush_offset[thin_axis_idx] = -mounting_face_val
+        else:
+            # T-clip points in negative direction, mounting face at MAX
+            mounting_face_val = rot_bounds[1][thin_axis_idx]
+            print(f"    Mounting face is at MAX of axis {thin_axis_idx} (value={mounting_face_val:.4f})")
+            # Need to offset so MAX is at origin, then translate to position
+            if abs(mounting_face_val) > 0.1:
+                flush_offset[thin_axis_idx] = -mounting_face_val
+
         print(f"    T-clip will be flush at face, extending {rot_dims[thin_axis_idx]:.2f}mm INTO mesh")
     else:
         # Legacy fallback for grid_plane without cut_normal
