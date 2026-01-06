@@ -160,6 +160,10 @@ def insert_tclip(mesh, tclip_mesh, position, rotation_angle=0, grid_plane='xy', 
                 rot_matrix = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
                 tclip_copy.apply_transform(rot_matrix)
                 print(f"    Applied 180° rotation to reverse Y-axis direction")
+                # After this rotation, the T-clip is flipped - need 180° around Y to fix orientation
+                rot_matrix_y = trimesh.transformations.rotation_matrix(np.pi, [0, 1, 0])
+                tclip_copy.apply_transform(rot_matrix_y)
+                print(f"    Applied 180° rotation around Y-axis to fix T orientation")
             else:
                 rot_axis = np.cross(from_axis, target_axis)
                 rot_angle = np.arccos(np.clip(np.dot(from_axis, target_axis), -1.0, 1.0))
