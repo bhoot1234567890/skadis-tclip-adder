@@ -137,11 +137,11 @@ Everything flows through a single `trimesh.Trimesh` object — loaded, gridded, 
 
 ```mermaid
 flowchart LR
-    A["STL / STEP / OBJ"] --> B["mesh_loader.load_mesh\n(auto-repair)"]
-    B --> C["SkadisGrid\n(staggered slots)"]
-    C --> D["boolean_ops.cut_hole\n(∅ 28.284 mm)"]
+    A["STL / STEP / OBJ"] --> B["mesh_loader.load_mesh<br/>(auto-repair)"]
+    B --> C["SkadisGrid<br/>(staggered slots)"]
+    C --> D["boolean_ops.cut_hole<br/>(∅ 28.284 mm)"]
     D --> E{Insert T-clip?}
-    E -- yes --> F["insert_tclip\n(scale + recenter)"]
+    E -- yes --> F["insert_tclip<br/>(scale + recenter)"]
     E -- no --> G["modified mesh"]
     F --> G
     G --> H["export STL / STEP"]
